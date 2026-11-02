@@ -1,0 +1,11 @@
+/target
+node_modules/
+dist/
+.env
+*.keystore
+*.jks
+local.properties
+.gradle/
+build/
+.idea/
+.DS_Store
