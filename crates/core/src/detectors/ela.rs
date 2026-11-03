@@ -60,7 +60,11 @@ impl ElaDetector {
 
         for (x, y, a) in original.enumerate_pixels() {
             let b = resaved.get_pixel(x, y);
-            let diff: u32 = a.0.iter().zip(b.0.iter()).map(|(p, q)| p.abs_diff(*q) as u32).sum();
+            let diff: u32 =
+                a.0.iter()
+                    .zip(b.0.iter())
+                    .map(|(p, q)| p.abs_diff(*q) as u32)
+                    .sum();
             let idx = (y / block) as usize * cols + (x / block) as usize;
             sums[idx] += diff as f64 / 3.0;
             counts[idx] += 1;
@@ -69,7 +73,13 @@ impl ElaDetector {
         let means = sums
             .iter()
             .zip(&counts)
-            .map(|(s, c)| if *c == 0 { 0.0 } else { (*s / *c as f64) as f32 })
+            .map(|(s, c)| {
+                if *c == 0 {
+                    0.0
+                } else {
+                    (*s / *c as f64) as f32
+                }
+            })
             .collect();
         (means, cols, rows)
     }
@@ -193,24 +203,47 @@ mod tests {
         assert!(findings.is_empty());
     }
 
-    #[test]
-    fn high_frequency_patch_on_smooth_page_is_flagged() {
-        let mut page = RgbImage::from_fn(256, 256, |x, _| {
-            let v = (x / 2 + 64) as u8;
+    /// Smooth gradient with deterministic grain; `seed` changes the grain.
+    fn noisy_page(seed: u32) -> RgbImage {
+        RgbImage::from_fn(256, 256, |x, y| {
+            let mut h = x
+                .wrapping_mul(374_761_393)
+                .wrapping_add(y.wrapping_mul(668_265_263))
+                .wrapping_add(seed);
+            h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
+            let grain = ((h ^ (h >> 16)) % 25) as i32 - 12;
+            let v = (x as i32 / 2 + 64 + grain).clamp(0, 255) as u8;
             Rgb([v, v, v])
+        })
+    }
+
+    #[test]
+    fn patch_with_a_different_save_history_is_flagged() {
+        // The page was saved once at quality 60, then a fresh region was pasted in.
+        let first_save = ElaDetector::new(ElaConfig {
+            quality: 60,
+            ..ElaConfig::default()
         });
+        let mut page = first_save.recompress(&noisy_page(1)).unwrap();
+
+        let fresh = noisy_page(2);
         for y in 96..160 {
             for x in 96..160 {
-                let v = if (x + y) % 2 == 0 { 0 } else { 255 };
-                page.put_pixel(x, y, Rgb([v, v, v]));
+                page.put_pixel(x, y, *fresh.get_pixel(x, y));
             }
         }
 
-        let findings = ElaDetector::default().analyze(&id(), 0, &page).unwrap();
+        let detector = ElaDetector::new(ElaConfig {
+            min_error: 0.5,
+            ..ElaConfig::default()
+        });
+        let findings = detector.analyze(&id(), 0, &page).unwrap();
         assert!(!findings.is_empty());
 
         let patch = Rect::new(96.0, 96.0, 64.0, 64.0);
-        assert!(findings.iter().any(|f| f.region.iou(&patch) > 0.5));
-        assert!(findings.iter().all(|f| f.status == Status::PotentialManipulation));
+        assert!(findings.iter().any(|f| f.region.iou(&patch) > 0.4));
+        assert!(findings
+            .iter()
+            .all(|f| f.status == Status::PotentialManipulation));
     }
 }

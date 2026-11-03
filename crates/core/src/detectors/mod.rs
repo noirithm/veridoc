@@ -1,7 +1,9 @@
 mod blocks;
+mod copy_move;
 mod ela;
 mod noise;
 
+pub use copy_move::{CopyMoveConfig, CopyMoveDetector};
 pub use ela::{ElaConfig, ElaDetector};
 pub use noise::{NoiseConfig, NoiseDetector};
 

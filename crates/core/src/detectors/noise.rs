@@ -128,7 +128,11 @@ impl Detector for NoiseDetector {
             // Noise statistics are easily affected by page content, so the
             // confidence stays modest and grows slowly with the deviation.
             let confidence = (0.25 + 0.05 * (peak - self.config.z_threshold)).clamp(0.25, 0.6);
-            let direction = if mean_level < centre { "lower" } else { "higher" };
+            let direction = if mean_level < centre {
+                "lower"
+            } else {
+                "higher"
+            };
 
             findings.push(Finding::new(
                 document.clone(),
