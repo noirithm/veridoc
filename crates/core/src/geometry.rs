@@ -46,6 +46,14 @@ impl Rect {
             inter / union
         }
     }
+
+    pub fn union(&self, other: &Rect) -> Rect {
+        let left = self.x.min(other.x);
+        let top = self.y.min(other.y);
+        let right = (self.x + self.width).max(other.x + other.width);
+        let bottom = (self.y + self.height).max(other.y + other.height);
+        Rect::new(left, top, right - left, bottom - top)
+    }
 }
 
 #[cfg(test)]
@@ -72,5 +80,12 @@ mod tests {
         let b = Rect::new(5.0, 0.0, 10.0, 10.0);
         // intersection 50, union 150
         assert!((a.iou(&b) - 1.0 / 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn union_covers_both_rects() {
+        let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+        let b = Rect::new(5.0, 5.0, 10.0, 10.0);
+        assert_eq!(a.union(&b), Rect::new(0.0, 0.0, 15.0, 15.0));
     }
 }

@@ -5,11 +5,15 @@ mod clock;
 pub mod detectors;
 pub mod error;
 pub mod evidence;
+pub mod fields;
 pub mod geometry;
 pub mod hash;
+pub mod ocr;
 
 pub use audit::{AuditEntry, AuditLog};
 pub use detectors::Detector;
 pub use error::{Error, Result};
 pub use evidence::{Confidence, DetectorKind, DocumentId, Finding, Status};
+pub use fields::{Field, FieldExtractor, FieldKind};
 pub use geometry::Rect;
+pub use ocr::{OcrEngine, OcrLine, OcrWord};
