@@ -10,6 +10,9 @@ pub enum Error {
 
     #[error(transparent)]
     Json(#[from] serde_json::Error),
+
+    #[error(transparent)]
+    Image(#[from] image::ImageError),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
