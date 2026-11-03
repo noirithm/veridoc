@@ -1,8 +1,9 @@
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, ImageFormat, RgbImage};
 
+use super::blocks::find_clusters;
 use super::Detector;
-use crate::{Confidence, DetectorKind, DocumentId, Finding, Rect, Result, Status};
+use crate::{Confidence, DetectorKind, DocumentId, Finding, Result, Status};
 
 #[derive(Debug, Clone)]
 pub struct ElaConfig {
@@ -110,47 +111,19 @@ impl Detector for ElaDetector {
         let threshold = (mean + self.config.z_threshold * std).max(self.config.min_error);
         let flagged: Vec<bool> = errors.iter().map(|e| *e >= threshold).collect();
 
-        let block = self.config.block;
-        let mut seen = vec![false; flagged.len()];
         let mut findings = Vec::new();
-
-        for start in 0..flagged.len() {
-            if !flagged[start] || seen[start] {
-                continue;
-            }
-
-            seen[start] = true;
-            let mut stack = vec![start];
-            let (mut min_c, mut max_c, mut min_r, mut max_r) = (cols, 0, rows, 0);
-            let mut count = 0usize;
-            let mut peak = 0f32;
-
-            while let Some(i) = stack.pop() {
-                let (c, r) = (i % cols, i / cols);
-                min_c = min_c.min(c);
-                max_c = max_c.max(c);
-                min_r = min_r.min(r);
-                max_r = max_r.max(r);
-                count += 1;
-                peak = peak.max(errors[i]);
-
-                for n in neighbours(i, cols, rows).into_iter().flatten() {
-                    if flagged[n] && !seen[n] {
-                        seen[n] = true;
-                        stack.push(n);
-                    }
-                }
-            }
-
+        for cluster in find_clusters(&flagged, cols, rows) {
+            let count = cluster.members.len();
             if count < self.config.min_blocks {
                 continue;
             }
 
-            let x = min_c as u32 * block;
-            let y = min_r as u32 * block;
-            let right = ((max_c as u32 + 1) * block).min(image.width());
-            let bottom = ((max_r as u32 + 1) * block).min(image.height());
-            let region = Rect::new(x as f32, y as f32, (right - x) as f32, (bottom - y) as f32);
+            let region = cluster.region(self.config.block, image.width(), image.height());
+            let peak = cluster
+                .members
+                .iter()
+                .map(|&i| errors[i])
+                .fold(0.0, f32::max);
 
             // Heuristic only: ELA is a weak signal, so confidence stays low
             // and rises slowly with how far the region sits above the page.
@@ -177,30 +150,14 @@ impl Detector for ElaDetector {
     }
 }
 
-fn neighbours(i: usize, cols: usize, rows: usize) -> [Option<usize>; 4] {
-    let (c, r) = (i % cols, i / cols);
-    [
-        (c > 0).then(|| i - 1),
-        (c + 1 < cols).then(|| i + 1),
-        (r > 0).then(|| i - cols),
-        (r + 1 < rows).then(|| i + cols),
-    ]
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Rect;
     use image::Rgb;
 
     fn id() -> DocumentId {
         DocumentId("test-doc".into())
-    }
-
-    #[test]
-    fn flat_page_has_no_findings() {
-        let page = RgbImage::from_pixel(128, 128, Rgb([200, 200, 200]));
-        let findings = ElaDetector::default().analyze(&id(), 0, &page).unwrap();
-        assert!(findings.is_empty());
     }
 
     /// Smooth gradient with deterministic grain; `seed` changes the grain.
@@ -215,6 +172,13 @@ mod tests {
             let v = (x as i32 / 2 + 64 + grain).clamp(0, 255) as u8;
             Rgb([v, v, v])
         })
+    }
+
+    #[test]
+    fn flat_page_has_no_findings() {
+        let page = RgbImage::from_pixel(128, 128, Rgb([200, 200, 200]));
+        let findings = ElaDetector::default().analyze(&id(), 0, &page).unwrap();
+        assert!(findings.is_empty());
     }
 
     #[test]
