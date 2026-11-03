@@ -2,15 +2,18 @@
 
 pub mod audit;
 mod clock;
+pub mod correlation;
 pub mod detectors;
 pub mod error;
 pub mod evidence;
 pub mod fields;
 pub mod geometry;
 pub mod hash;
+pub mod matching;
 pub mod ocr;
 
 pub use audit::{AuditEntry, AuditLog};
+pub use correlation::{correlate, CaseGraph, Correlation, Link, Relation};
 pub use detectors::Detector;
 pub use error::{Error, Result};
 pub use evidence::{Confidence, DetectorKind, DocumentId, Finding, Status};
