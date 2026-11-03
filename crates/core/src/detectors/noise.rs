@@ -1,6 +1,7 @@
 use image::RgbImage;
 
 use super::blocks::find_clusters;
+use super::stats::median;
 use super::Detector;
 use crate::{Confidence, DetectorKind, DocumentId, Finding, Result, Status};
 
@@ -151,15 +152,6 @@ impl Detector for NoiseDetector {
 
         Ok(findings)
     }
-}
-
-fn median(values: &mut [f32]) -> f32 {
-    if values.is_empty() {
-        return 0.0;
-    }
-    values.sort_by(|a, b| a.total_cmp(b));
-    let len = values.len();
-    (values[(len - 1) / 2] + values[len / 2]) / 2.0
 }
 
 #[cfg(test)]
