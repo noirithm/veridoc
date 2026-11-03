@@ -1,6 +1,9 @@
+mod blocks;
 mod ela;
+mod noise;
 
 pub use ela::{ElaConfig, ElaDetector};
+pub use noise::{NoiseConfig, NoiseDetector};
 
 use image::RgbImage;
 
