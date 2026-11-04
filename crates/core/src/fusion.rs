@@ -161,7 +161,7 @@ fn status_rank(status: Status) -> u8 {
     }
 }
 
-fn detector_label(kind: DetectorKind) -> &'static str {
+pub(crate) fn detector_label(kind: DetectorKind) -> &'static str {
     match kind {
         DetectorKind::ErrorLevel => "error level analysis",
         DetectorKind::Noise => "noise analysis",
