@@ -13,6 +13,7 @@ pub mod geometry;
 pub mod hash;
 pub mod matching;
 pub mod ocr;
+pub mod pipeline;
 
 pub use audit::{AuditEntry, AuditLog};
 pub use correlation::{correlate, CaseGraph, Correlation, Link, Relation};
@@ -24,3 +25,6 @@ pub use fields::{Field, FieldExtractor, FieldKind};
 pub use fusion::{fuse, FusedFinding, Priority};
 pub use geometry::Rect;
 pub use ocr::{OcrEngine, OcrLine, OcrWord};
+pub use pipeline::{
+    Analyzer, AssessedFinding, CaseReport, DocumentInput, DocumentSummary, Failure, PageInput,
+};
