@@ -1,6 +1,7 @@
 //! Core forensic analysis engine.
 
 pub mod audit;
+pub mod case;
 mod clock;
 pub mod correlation;
 pub mod detectors;
@@ -16,6 +17,7 @@ pub mod ocr;
 pub mod pipeline;
 
 pub use audit::{AuditEntry, AuditLog};
+pub use case::CaseBuilder;
 pub use correlation::{correlate, CaseGraph, Correlation, Link, Relation};
 pub use detectors::Detector;
 pub use error::{Error, Result};

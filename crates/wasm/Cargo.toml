@@ -1,0 +1,15 @@
+[package]
+name = "veridoc-wasm"
+description = "WebAssembly bindings for the Veridoc analysis engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+veridoc-core = { path = "../core" }
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"

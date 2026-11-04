@@ -13,6 +13,12 @@ pub enum Error {
 
     #[error(transparent)]
     Image(#[from] image::ImageError),
+
+    #[error("no document with id '{0}' has been added")]
+    UnknownDocument(String),
+
+    #[error("a document with id '{0}' was already added")]
+    DuplicateDocument(String),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
