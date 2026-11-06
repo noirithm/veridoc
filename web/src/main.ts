@@ -1,74 +1,40 @@
 import './style.css';
+import { el } from './dom';
 import { Engine } from './engine';
 import type { WorkerDocument } from './protocol';
-import type { CaseReport } from './types';
+import { createViewer } from './viewer';
 
 const app = document.getElementById('app');
 if (!app) throw new Error('The #app element is missing from index.html.');
 
-function el<K extends keyof HTMLElementTagNameMap>(
-  tag: K,
-  text?: string,
-  className?: string,
-): HTMLElementTagNameMap[K] {
-  const node = document.createElement(tag);
-  // textContent keeps file names and findings from being treated as HTML.
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
+interface Upload {
+  documents: WorkerDocument[];
+  /** Object URL of each document's image, keyed by document id. */
+  images: Map<string, string>;
 }
 
-async function readDocuments(files: File[]): Promise<WorkerDocument[]> {
-  return Promise.all(
+async function readUpload(files: File[]): Promise<Upload> {
+  const images = new Map<string, string>();
+
+  const documents = await Promise.all(
     files.map(async (file, index) => {
+      const id = `doc-${index + 1}`;
       const bytes = new Uint8Array(await file.arrayBuffer());
-      return {
-        id: `doc-${index + 1}`,
-        name: file.name,
-        source: bytes,
-        pages: [{ image: bytes, lines: [] }],
-      };
+      images.set(id, URL.createObjectURL(file));
+      return { id, name: file.name, source: bytes, pages: [{ image: bytes, lines: [] }] };
     }),
   );
+  return { documents, images };
 }
 
-function renderReport(report: CaseReport): HTMLElement {
-  const section = el('section');
-  section.append(el('p', report.overview));
-
-  for (const failure of report.failures) {
-    section.append(
-      el('p', `Could not run ${failure.step} on ${failure.document}: ${failure.message}`, 'meta'),
-    );
+function release(images: Map<string, string>): void {
+  for (const url of images.values()) {
+    URL.revokeObjectURL(url);
   }
-
-  const list = el('ol');
-  for (const { finding, explanation } of report.findings) {
-    const item = el('li');
-    item.append(el('strong', explanation.headline));
-    item.append(
-      el(
-        'div',
-        `${finding.document}, page ${finding.page + 1}, region at ` +
-          `${Math.round(finding.region.x)}, ${Math.round(finding.region.y)}`,
-        'meta',
-      ),
-    );
-
-    // Which checks fired, and what each one measured.
-    item.append(el('div', `Checks: ${finding.detectors.join(', ')}`, 'meta'));
-    for (const member of finding.members) {
-      item.append(el('div', `${member.detector}: ${member.summary}`, 'meta'));
-    }
-
-    list.append(item);
-  }
-  section.append(list);
-  section.append(el('p', `Audit log: ${report.audit.entries.length} entries`, 'meta'));
-  return section;
 }
 
 const engine = new Engine();
+let shown = new Map<string, string>();
 
 const input = el('input');
 input.type = 'file';
@@ -99,13 +65,18 @@ button.addEventListener('click', async () => {
 
   button.disabled = true;
   status.textContent = 'Analysing...';
-  output.replaceChildren();
 
+  let upload: Upload | undefined;
   try {
-    const report = await engine.analyze(await readDocuments(files));
+    upload = await readUpload(files);
+    const report = await engine.analyze(upload.documents);
+
+    release(shown);
+    shown = upload.images;
+    output.replaceChildren(createViewer({ report, images: shown }));
     status.textContent = `Finished ${files.length} document(s).`;
-    output.append(renderReport(report));
   } catch (error) {
+    if (upload && upload.images !== shown) release(upload.images);
     status.textContent = error instanceof Error ? error.message : String(error);
   } finally {
     button.disabled = false;

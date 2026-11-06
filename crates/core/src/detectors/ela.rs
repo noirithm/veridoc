@@ -153,7 +153,7 @@ impl Detector for ElaDetector {
 
             // Heuristic only: ELA is a weak signal, so confidence stays low
             // and rises slowly with how far the region sits above its peers.
-            let score = (0.3 + 0.05 * (strongest - self.config.z_threshold)).clamp(0.3, 0.7);
+            let score = (0.3 + 0.05 * (strongest - self.config.z_threshold)).clamp(0.3, 0.5);
 
             findings.push(Finding::new(
                 document.clone(),

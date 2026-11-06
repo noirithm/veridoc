@@ -20,6 +20,11 @@ pub struct TypographyConfig {
     pub min_baseline_shift: f32,
     /// Pages with less brightness range than this are treated as blank.
     pub min_contrast: u8,
+    /// A horizontal gap wider than this many line heights starts a new column.
+    pub column_gap: f32,
+    /// Glyphs shorter than this fraction of the line's median height are
+    /// punctuation (colons, full stops, dots of an "i") and are ignored.
+    pub min_letter_height: f32,
 }
 
 impl Default for TypographyConfig {
@@ -32,6 +37,8 @@ impl Default for TypographyConfig {
             thickness_ratio: 1.5,
             min_baseline_shift: 2.0,
             min_contrast: 60,
+            column_gap: 4.0,
+            min_letter_height: 0.5,
         }
     }
 }
@@ -191,33 +198,46 @@ impl TypographyDetector {
     }
 
     fn split_words(&self, glyphs: &[Glyph], line_height: f32) -> Vec<Word> {
-        let mut ordered = glyphs.to_vec();
-        ordered.sort_by_key(|g| g.left);
-        let gap_limit = line_height * 0.5;
-
-        let mut groups: Vec<Vec<Glyph>> = Vec::new();
-        let mut reach = 0f32;
-        for glyph in ordered {
-            let starts_new = groups.is_empty() || glyph.left as f32 - reach > gap_limit;
-            if starts_new {
-                groups.push(Vec::new());
-                reach = glyph.right as f32;
-            } else {
-                reach = reach.max(glyph.right as f32);
-            }
-            if let Some(group) = groups.last_mut() {
-                group.push(glyph);
-            }
-        }
-
-        groups
+        group_by_gap(glyphs, line_height * 0.5)
             .into_iter()
-            .filter(|g| g.len() >= self.config.min_word_glyphs)
+            .filter(|group| group.len() >= self.config.min_word_glyphs)
             .map(Word::from_glyphs)
             .collect()
     }
 
+    /// Splits a line into columns and checks each on its own. Words in
+    /// separate columns, such as a label block and a value block or
+    /// neighbouring table cells, are not meant to look alike.
+    /// Splits a line into columns and checks each on its own. Words in
+    /// separate columns, such as a label block and a value block or
+    /// neighbouring table cells, are not meant to look alike.
     fn check_line(
+        &self,
+        document: &DocumentId,
+        page: u32,
+        glyphs: &[Glyph],
+        width: u32,
+        height: u32,
+    ) -> Result<Vec<Finding>> {
+        let mut heights: Vec<f32> = glyphs.iter().map(|g| g.height() as f32).collect();
+        let line_height = median(&mut heights);
+
+        // Punctuation is far smaller than the letters. Left in, a colon
+        // would be read as a two-glyph word sitting at the wrong height.
+        let letters: Vec<Glyph> = glyphs
+            .iter()
+            .copied()
+            .filter(|g| g.height() as f32 >= line_height * self.config.min_letter_height)
+            .collect();
+
+        let mut findings = Vec::new();
+        for column in group_by_gap(&letters, line_height * self.config.column_gap) {
+            findings.extend(self.check_column(document, page, &column, width, height)?);
+        }
+        Ok(findings)
+    }
+
+    fn check_column(
         &self,
         document: &DocumentId,
         page: u32,
@@ -239,23 +259,46 @@ impl TypographyDetector {
         let typical_baseline = median(&mut baselines);
         let baseline_limit = (line_height * 0.25).max(self.config.min_baseline_shift);
 
-        let mut findings = Vec::new();
-        for word in &words {
-            let mut reasons = Vec::new();
-
+        let thickness_ratio = |word: &Word| -> f32 {
             if typical_thickness > 0.0 {
-                let ratio = word.thickness / typical_thickness;
+                word.thickness / typical_thickness
+            } else {
+                1.0
+            }
+        };
+
+        let differs_in_thickness: Vec<bool> = words
+            .iter()
+            .map(|word| {
+                let ratio = thickness_ratio(word);
                 let change = (word.thickness - typical_thickness).abs();
                 let limit = self.config.thickness_ratio;
-                if change >= 0.75 && (ratio >= limit || ratio <= 1.0 / limit) {
-                    reasons.push(format!(
-                        "stroke thickness is {ratio:.1}x that of the rest of the line"
-                    ));
-                }
-            }
+                change >= 0.75 && (ratio >= limit || ratio <= 1.0 / limit)
+            })
+            .collect();
+        let differs_in_baseline: Vec<bool> = words
+            .iter()
+            .map(|word| (word.baseline - typical_baseline).abs() >= baseline_limit)
+            .collect();
 
-            let shift = word.baseline - typical_baseline;
-            if shift.abs() >= baseline_limit {
+        // A style shared by many words (bold labels beside regular values) is
+        // layout, not an edit, so only a minority of the words can be exceptions.
+        let is_minority = |flags: &[bool]| flags.iter().filter(|&&f| f).count() * 3 <= words.len();
+        let report_thickness = is_minority(&differs_in_thickness);
+        let report_baseline = is_minority(&differs_in_baseline);
+
+        let mut findings = Vec::new();
+        for (index, word) in words.iter().enumerate() {
+            let mut reasons = Vec::new();
+
+            if report_thickness && differs_in_thickness[index] {
+                reasons.push(format!(
+                    "stroke thickness is {:.1}x that of the rest of the line",
+                    thickness_ratio(word)
+                ));
+            }
+            if report_baseline && differs_in_baseline[index] {
+                let shift = word.baseline - typical_baseline;
                 let direction = if shift > 0.0 { "lower" } else { "higher" };
                 reasons.push(format!(
                     "the baseline sits {:.1} px {direction} than the rest of the line",
@@ -335,6 +378,28 @@ fn is_ink(ink: &[bool], width: usize, height: usize, x: isize, y: isize) -> bool
         && (x as usize) < width
         && (y as usize) < height
         && ink[y as usize * width + x as usize]
+}
+
+/// Splits glyphs into runs separated by horizontal gaps wider than `gap_limit`.
+fn group_by_gap(glyphs: &[Glyph], gap_limit: f32) -> Vec<Vec<Glyph>> {
+    let mut ordered = glyphs.to_vec();
+    ordered.sort_by_key(|g| g.left);
+
+    let mut groups: Vec<Vec<Glyph>> = Vec::new();
+    let mut reach = 0f32;
+    for glyph in ordered {
+        let starts_new = groups.is_empty() || glyph.left as f32 - reach > gap_limit;
+        if starts_new {
+            groups.push(Vec::new());
+            reach = glyph.right as f32;
+        } else {
+            reach = reach.max(glyph.right as f32);
+        }
+        if let Some(group) = groups.last_mut() {
+            group.push(glyph);
+        }
+    }
+    groups
 }
 
 /// Collects glyphs whose vertical extents overlap into text lines.
@@ -422,7 +487,7 @@ mod tests {
 
     /// One text line; each word is given as (top, bar width).
     fn line_page(words: &[(u32, u32)]) -> RgbImage {
-        let mut page = RgbImage::from_pixel(360, 90, Rgb([255, 255, 255]));
+        let mut page = RgbImage::from_pixel(20 + words.len() as u32 * 70, 90, Rgb([255, 255, 255]));
         for (i, &(y, bar_width)) in words.iter().enumerate() {
             draw_word(&mut page, 10 + i as u32 * 70, y, bar_width);
         }
@@ -474,6 +539,60 @@ mod tests {
     #[test]
     fn short_lines_are_not_compared() {
         let page = line_page(&[(30, 2), (36, 2)]);
+        let findings = TypographyDetector::default()
+            .analyze(&id(), 0, &page)
+            .unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn a_style_shared_by_several_words_is_treated_as_layout() {
+        // Three heavy words among seven look like bold labels, not an edit.
+        let page = line_page(&[
+            (30, 5),
+            (30, 5),
+            (30, 5),
+            (30, 2),
+            (30, 2),
+            (30, 2),
+            (30, 2),
+        ]);
+        let findings = TypographyDetector::default()
+            .analyze(&id(), 0, &page)
+            .unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn a_word_in_a_separate_column_is_not_compared_with_the_text_beside_it() {
+        let mut page = RgbImage::from_pixel(640, 90, Rgb([255, 255, 255]));
+        for i in 0..3 {
+            draw_word(&mut page, 10 + i * 70, 30, 2);
+        }
+        draw_word(&mut page, 500, 36, 2);
+
+        let findings = TypographyDetector::default()
+            .analyze(&id(), 0, &page)
+            .unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn punctuation_between_words_is_not_treated_as_a_word() {
+        let mut page = RgbImage::from_pixel(320, 90, Rgb([255, 255, 255]));
+        draw_word(&mut page, 10, 30, 2);
+        draw_word(&mut page, 100, 30, 2);
+        draw_word(&mut page, 150, 30, 2);
+
+        // A colon after the first word: two small dots, one above the other.
+        for top in [33, 41] {
+            for y in top..top + 6 {
+                for x in 52..58 {
+                    page.put_pixel(x, y, Rgb([0, 0, 0]));
+                }
+            }
+        }
+
         let findings = TypographyDetector::default()
             .analyze(&id(), 0, &page)
             .unwrap();
