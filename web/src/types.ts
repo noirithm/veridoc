@@ -17,7 +17,8 @@ export type DetectorKind =
   | 'signature'
   | 'pdf_structure'
   | 'ocr_confidence'
-  | 'cross_document';
+  | 'cross_document'
+  | 'ink_marks';
 
 export type FieldKind =
   | 'name'

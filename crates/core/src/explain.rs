@@ -162,7 +162,14 @@ fn inferences(finding: &FusedFinding) -> Vec<String> {
                 .into(),
         );
     }
-
+    if has(DetectorKind::InkMarks) {
+        notes.push(
+            "Pen marks are visible on the printed page. Hand corrections can be legitimate \
+             when initialled or stamped by the issuer, but they also change what the \
+             document says, and nothing in the file shows who made them or when."
+                .into(),
+        );
+    }
     notes.push("This is a statistical indication, not proof of tampering.".into());
     notes
 }
@@ -212,6 +219,13 @@ fn checks(finding: &FusedFinding) -> Vec<String> {
             &mut steps,
             "Ask the applicant to confirm the correct value and provide a supporting document.",
         );
+    }
+    if has(DetectorKind::InkMarks) {
+        add_unique(
+            &mut steps,
+            "Check whether the correction is initialled, dated or stamped by the issuer.",
+        );
+        add_unique(&mut steps, "Compare with the issuer's own copy or a fresh statement to confirm the corrected values.");
     }
 
     if finding.priority == Priority::Low {

@@ -9,6 +9,7 @@ export const DETECTOR_LABELS: Record<DetectorKind, string> = {
   pdf_structure: 'PDF structure check',
   ocr_confidence: 'OCR confidence check',
   cross_document: 'Cross-document comparison',
+  ink_marks: 'Pen mark check',
 };
 
 export const PRIORITY_LABELS: Record<Priority, string> = {

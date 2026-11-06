@@ -171,6 +171,7 @@ pub(crate) fn detector_label(kind: DetectorKind) -> &'static str {
         DetectorKind::PdfStructure => "PDF structure check",
         DetectorKind::OcrConfidence => "OCR confidence check",
         DetectorKind::CrossDocument => "cross-document comparison",
+        DetectorKind::InkMarks => "pen mark check",
     }
 }
 

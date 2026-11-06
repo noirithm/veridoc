@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::audit::AuditLog;
 use crate::correlation::{correlate, CaseGraph};
 use crate::detectors::{
-    CopyMoveDetector, Detector, ElaDetector, NoiseDetector, TypographyDetector,
+    CopyMoveDetector, Detector, ElaDetector, InkMarksDetector, NoiseDetector, TypographyDetector,
 };
 use crate::explain::{explain, overview, Explanation};
 use crate::fusion::{detector_label, fuse, FusedFinding};
@@ -88,6 +88,7 @@ impl Analyzer {
             Box::new(NoiseDetector::default()),
             Box::new(CopyMoveDetector::default()),
             Box::new(TypographyDetector::default()),
+            Box::new(InkMarksDetector::default()),
         ])
     }
 

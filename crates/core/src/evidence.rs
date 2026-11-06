@@ -66,6 +66,7 @@ pub enum DetectorKind {
     PdfStructure,
     OcrConfidence,
     CrossDocument,
+    InkMarks,
 }
 
 /// A single piece of evidence tied to a region of a document page.

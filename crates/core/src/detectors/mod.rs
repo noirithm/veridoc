@@ -3,12 +3,14 @@ mod copy_move;
 mod ela;
 #[cfg(test)]
 mod fixtures;
+mod ink;
 mod noise;
 mod stats;
 mod typography;
 
 pub use copy_move::{CopyMoveConfig, CopyMoveDetector};
 pub use ela::{ElaConfig, ElaDetector};
+pub use ink::{InkMarksConfig, InkMarksDetector};
 pub use noise::{NoiseConfig, NoiseDetector};
 pub use typography::{TypographyConfig, TypographyDetector};
 
