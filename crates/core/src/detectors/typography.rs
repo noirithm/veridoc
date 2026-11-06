@@ -90,7 +90,20 @@ struct Word {
 impl Word {
     fn from_glyphs(glyphs: Vec<Glyph>) -> Self {
         let mut thicknesses: Vec<f32> = glyphs.iter().map(|g| g.thickness).collect();
-        let mut bottoms: Vec<f32> = glyphs.iter().map(|g| g.bottom as f32).collect();
+        let tallest = glyphs.iter().map(Glyph::height).max().unwrap_or(0);
+
+        // Tails (g, p, y) and punctuation sit below or above the baseline, so
+        // it is taken from the highest bottom among full-size glyphs.
+        let lowest_flat = glyphs
+            .iter()
+            .filter(|g| g.height() * 2 >= tallest)
+            .map(|g| g.bottom as f32)
+            .fold(f32::INFINITY, f32::min);
+        let baseline = if lowest_flat.is_finite() {
+            lowest_flat
+        } else {
+            0.0
+        };
 
         Self {
             left: glyphs.iter().map(|g| g.left).min().unwrap_or(0),
@@ -98,7 +111,7 @@ impl Word {
             right: glyphs.iter().map(|g| g.right).max().unwrap_or(0),
             bottom: glyphs.iter().map(|g| g.bottom).max().unwrap_or(0),
             thickness: median(&mut thicknesses),
-            baseline: median(&mut bottoms),
+            baseline,
         }
     }
 }
@@ -224,7 +237,7 @@ impl TypographyDetector {
         let mut baselines: Vec<f32> = words.iter().map(|w| w.baseline).collect();
         let typical_thickness = median(&mut thicknesses);
         let typical_baseline = median(&mut baselines);
-        let baseline_limit = (line_height * 0.12).max(self.config.min_baseline_shift);
+        let baseline_limit = (line_height * 0.25).max(self.config.min_baseline_shift);
 
         let mut findings = Vec::new();
         for word in &words {

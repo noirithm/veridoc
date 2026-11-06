@@ -1,6 +1,8 @@
 mod blocks;
 mod copy_move;
 mod ela;
+#[cfg(test)]
+mod fixtures;
 mod noise;
 mod stats;
 mod typography;

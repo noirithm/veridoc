@@ -1,7 +1,7 @@
 use image::codecs::jpeg::JpegEncoder;
 use image::{ExtendedColorType, ImageFormat, RgbImage};
 
-use super::blocks::find_clusters;
+use super::blocks::{block_activity, find_clusters, peer_scores};
 use super::Detector;
 use crate::{Confidence, DetectorKind, DocumentId, Finding, Result, Status};
 
@@ -11,10 +11,14 @@ pub struct ElaConfig {
     pub quality: u8,
     /// Side length of the analysis blocks, in pixels.
     pub block: u32,
-    /// How many standard deviations above the page average a block must be.
+    /// How far above comparable blocks a block must sit to be flagged.
     pub z_threshold: f32,
-    /// Absolute floor for the mean error, so flat pages produce nothing.
+    /// Absolute floor for the error, so near-perfect pages produce nothing.
     pub min_error: f32,
+    /// Smallest spread assumed among peers, so tiny differences stay quiet.
+    pub min_spread: f32,
+    /// Blocks on each side, in activity order, that count as comparable.
+    pub peer_window: usize,
     /// Smallest cluster of flagged blocks worth reporting.
     pub min_blocks: usize,
 }
@@ -24,8 +28,10 @@ impl Default for ElaConfig {
         Self {
             quality: 90,
             block: 16,
-            z_threshold: 2.5,
+            z_threshold: 4.0,
             min_error: 1.5,
+            min_spread: 0.5,
+            peer_window: 75,
             min_blocks: 2,
         }
     }
@@ -101,15 +107,24 @@ impl Detector for ElaDetector {
         let resaved = self.recompress(image)?;
         let (errors, cols, rows) = self.block_errors(image, &resaved);
 
-        let mean = errors.iter().sum::<f32>() / errors.len() as f32;
-        let variance = errors.iter().map(|e| (e - mean).powi(2)).sum::<f32>() / errors.len() as f32;
-        let std = variance.sqrt();
-        if std < 1e-6 {
-            return Ok(Vec::new());
-        }
+        // Printed text always re-compresses worse than blank paper, so each
+        // block is judged against blocks with a similar amount of detail.
+        let gray = image::imageops::grayscale(image);
+        let activity = block_activity(&gray, self.config.block);
+        let peers = peer_scores(
+            &errors,
+            &activity,
+            self.config.peer_window,
+            self.config.min_spread,
+        );
 
-        let threshold = (mean + self.config.z_threshold * std).max(self.config.min_error);
-        let flagged: Vec<bool> = errors.iter().map(|e| *e >= threshold).collect();
+        let flagged: Vec<bool> = errors
+            .iter()
+            .zip(&peers)
+            .map(|(error, peer)| {
+                peer.z >= self.config.z_threshold && *error >= self.config.min_error
+            })
+            .collect();
 
         let mut findings = Vec::new();
         for cluster in find_clusters(&flagged, cols, rows) {
@@ -124,11 +139,21 @@ impl Detector for ElaDetector {
                 .iter()
                 .map(|&i| errors[i])
                 .fold(0.0, f32::max);
+            let strongest = cluster
+                .members
+                .iter()
+                .map(|&i| peers[i].z)
+                .fold(0.0, f32::max);
+            let typical = cluster
+                .members
+                .iter()
+                .map(|&i| peers[i].typical)
+                .sum::<f32>()
+                / count as f32;
 
             // Heuristic only: ELA is a weak signal, so confidence stays low
-            // and rises slowly with how far the region sits above the page.
-            let z = (peak - mean) / std;
-            let score = (0.3 + 0.1 * (z - self.config.z_threshold)).clamp(0.3, 0.7);
+            // and rises slowly with how far the region sits above its peers.
+            let score = (0.3 + 0.05 * (strongest - self.config.z_threshold)).clamp(0.3, 0.7);
 
             findings.push(Finding::new(
                 document.clone(),
@@ -138,10 +163,9 @@ impl Detector for ElaDetector {
                 Status::PotentialManipulation,
                 Confidence::new(score)?,
                 format!(
-                    "Compression error is {:.1}x the page average across {} blocks, \
-                     which can indicate a region saved separately from its surroundings",
-                    peak / mean.max(f32::EPSILON),
-                    count
+                    "Compression error reaches {peak:.1} where comparable areas of the page \
+                     average {typical:.1} ({count} blocks), which can indicate a region \
+                     saved separately from its surroundings"
                 ),
             ));
         }
@@ -153,6 +177,7 @@ impl Detector for ElaDetector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::detectors::fixtures::text_page;
     use crate::Rect;
     use image::Rgb;
 
@@ -182,6 +207,14 @@ mod tests {
     }
 
     #[test]
+    fn printed_text_on_blank_paper_is_not_flagged() {
+        let findings = ElaDetector::default()
+            .analyze(&id(), 0, &text_page())
+            .unwrap();
+        assert!(findings.is_empty());
+    }
+
+    #[test]
     fn patch_with_a_different_save_history_is_flagged() {
         // The page was saved once at quality 60, then a fresh region was pasted in.
         let first_save = ElaDetector::new(ElaConfig {
@@ -199,6 +232,7 @@ mod tests {
 
         let detector = ElaDetector::new(ElaConfig {
             min_error: 0.5,
+            z_threshold: 3.0,
             ..ElaConfig::default()
         });
         let findings = detector.analyze(&id(), 0, &page).unwrap();
